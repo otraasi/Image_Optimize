@@ -1,0 +1,13 @@
+{
+  "name": "image-resizer",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for image resizing",
+  "main": "index.js",
+  "dependencies": {
+    "sharp": "^0.32.1",
+    "aws-sdk": "^2.1450.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
