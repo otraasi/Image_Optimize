@@ -11,13 +11,14 @@ provider "aws" {
   region = var.aws_region
 }
 
-# S3 bucket for source images
-resource "aws_s3_bucket" "source_images" {
+
+# If the bucket already exists, don't do anything
+data "aws_s3_bucket" "source_images" {
   bucket = var.source_bucket_name
 }
 
 resource "aws_s3_bucket_public_access_block" "source_images" {
-  bucket = aws_s3_bucket.source_images.id
+  bucket = data.aws_s3_bucket.source_images.id
 
   block_public_acls       = true
   block_public_policy     = true
@@ -81,8 +82,8 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "s3:ListBucket"
         ]
         Resource = [
-          aws_s3_bucket.source_images.arn,
-          "${aws_s3_bucket.source_images.arn}/*"
+          data.aws_s3_bucket.source_images.arn,
+          "${data.aws_s3_bucket.source_images.arn}/*"
         ]
       },
       {
@@ -114,7 +115,7 @@ resource "aws_lambda_function" "image_resizer" {
 
   environment {
     variables = {
-      SOURCE_BUCKET = aws_s3_bucket.source_images.id
+      SOURCE_BUCKET = data.aws_s3_bucket.source_images.id
       RESIZED_BUCKET = aws_s3_bucket.resized_images.id
     }
   }
