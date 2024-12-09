@@ -143,10 +143,12 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   integration_method = "POST"
 }
 
-# API Gateway route
+# API Gateway routes
 resource "aws_apigatewayv2_route" "image_route" {
+  for_each = toset(["GET /resize", "GET /original"])
+
   api_id = aws_apigatewayv2_api.image_api.id
-  route_key = "GET /resize"
+  route_key = each.key
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 }
 
