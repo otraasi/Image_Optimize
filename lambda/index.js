@@ -16,7 +16,7 @@ const getDimensions = (queryParams) => {
     const width = queryParams.width ? parseInt(queryParams.width) : null;
     const height = queryParams.height ? parseInt(queryParams.height) : null;
     const size = queryParams.size ? queryParams.size.toLowerCase() : null;
-    const fit = queryParams.fit ? queryParams.fit.toLowerCase() : 'cover';
+    const fit = queryParams.fit ? queryParams.fit.toLowerCase() : 'inside';
 
     // Validate fit option
     if (!['cover', 'contain', 'fill', 'inside', 'outside'].includes(fit)) {
@@ -53,10 +53,10 @@ const getDimensions = (queryParams) => {
 };
 
 // Generate the resized image key maintaining directory structure
-const getResizedImageKey = (originalKey, dimensions) => {
+const getResizedImageKey = (originalKey, dimensions, shouldWatermark = false, watermarkPosition = 'northeast') => {
     const dirName = originalKey.substring(0, originalKey.lastIndexOf('/'));
     const fileName = originalKey.substring(originalKey.lastIndexOf('/') + 1);
-    const resizeDirName = `${dimensions.width}x${dimensions.height}/${dimensions.fit}`;
+    const resizeDirName = `${dimensions.width}x${dimensions.height}/${dimensions.fit}${shouldWatermark ? `/watermarked/${watermarkPosition}` : ''}`;
     
     // Combine the paths, ensuring proper directory structure
     if (dirName === '') {
@@ -153,7 +153,9 @@ exports.handler = async (event) => {
         }
 
         // Generate resized image key maintaining directory structure
-        const resizedKey = getResizedImageKey(cleanImagePath, dimensions);
+        const shouldWatermark = queryParams.watermark !== undefined && queryParams.watermark !== 'false' ? true : false;
+        const watermarkPosition = queryParams.watermarkPosition ? queryParams.watermarkPosition.toLowerCase() : 'northeast';
+        const resizedKey = getResizedImageKey(cleanImagePath, dimensions, shouldWatermark, watermarkPosition);
         console.log('Generated resized image key:', resizedKey);
         
         try {
@@ -231,7 +233,6 @@ exports.handler = async (event) => {
         });
 
         // Check if watermark is required (default is true for backward compatibility)
-        const shouldWatermark = queryParams.watermark !== 'false';
         let resizedBuffer;
 
         if (shouldWatermark) {
@@ -245,11 +246,17 @@ exports.handler = async (event) => {
                 .resize(Math.floor(dimensions.width * 0.1) || 80) // Make watermark 10% of image width or 80px if width not specified
                 .toBuffer();
 
+            // Get watermark position from query parameters or default to northeast
+            const validWatermarkPosition = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'center'];
+            if (!validWatermarkPosition.includes(watermarkPosition)) {
+                throw new Error(`Invalid watermark position option. Must be one of: ${validWatermarkPosition.join(', ')}`);
+            }
+
             // Generate resized image with watermark
             resizedBuffer = await transform
                 .composite([{
                     input: watermarkImage,
-                    gravity: 'northeast' // Position at bottom right
+                    gravity: watermarkPosition
                 }])
                 .jpeg({ quality: 80 })
                 .toBuffer();
