@@ -125,6 +125,23 @@ resource "aws_lambda_function" "image_resizer" {
 resource "aws_apigatewayv2_api" "image_api" {
   name          = "${var.project_name}-image-api"
   protocol_type = "HTTP"
+  
+  cors_configuration {
+    allow_origins = ["*"]  # Or specify your allowed origins
+    allow_methods = ["GET", "HEAD", "OPTIONS"]
+    allow_headers = [
+      "Content-Type",
+      "X-Amz-Date",
+      "Authorization",
+      "X-Api-Key",
+      "X-Amz-Security-Token",
+      "X-Requested-With",
+      "Origin",
+      "Accept"
+    ]
+    expose_headers = ["*"]
+    max_age = 3600
+  }
 }
 
 # API Gateway stage
@@ -215,15 +232,128 @@ resource "aws_apigatewayv2_api_mapping" "api" {
   stage       = aws_apigatewayv2_stage.image_api.id
 }
 
-# DNS record for the API Gateway domain
+# CloudFront distribution
+resource "aws_cloudfront_distribution" "image_distribution" {
+  enabled             = true
+  is_ipv6_enabled     = true
+  price_class         = "PriceClass_100"
+  aliases             = [var.domain_name]
+
+  origin {
+    domain_name = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
+    origin_id   = "api-gateway-${aws_apigatewayv2_api.image_api.id}"
+    
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+      origin_keepalive_timeout = 5
+      origin_read_timeout      = 30
+    }
+    
+    custom_header {
+      name  = "X-Forwarded-Host"
+      value = var.domain_name
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD", "OPTIONS"]  # Added OPTIONS to cached methods
+    target_origin_id = "api-gateway-${aws_apigatewayv2_api.image_api.id}"
+    compress         = true
+    
+    cache_policy_id          = aws_cloudfront_cache_policy.image_cache_policy.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.image_request_policy.id
+    
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    acm_certificate_arn = aws_acm_certificate.api_cert.arn
+    ssl_support_method  = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
+  }
+}
+
+# Create a CloudFront cache policy
+resource "aws_cloudfront_cache_policy" "image_cache_policy" {
+  name        = "${var.project_name}-cache-policy"
+  comment     = "Cache policy for image optimization service"
+  default_ttl = 3600
+  max_ttl     = 86400
+  min_ttl     = 0
+  
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    
+    headers_config {
+      header_behavior = "whitelist"
+      headers {
+        items = [
+          "Origin",
+          "Access-Control-Request-Headers",
+          "Access-Control-Request-Method"
+        ]
+      }
+    }
+    
+    query_strings_config {
+      query_string_behavior = "all"
+    }
+    
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
+# Create a CloudFront origin request policy
+resource "aws_cloudfront_origin_request_policy" "image_request_policy" {
+  name    = "${var.project_name}-origin-request-policy"
+  comment = "Origin request policy for image optimization service"
+  
+  cookies_config {
+    cookie_behavior = "none"
+  }
+  
+  headers_config {
+    header_behavior = "whitelist"
+    headers {
+      items = [
+        "Origin",
+        "Access-Control-Request-Headers",
+        "Access-Control-Request-Method",
+        "Host"
+      ]
+    }
+  }
+  
+  query_strings_config {
+    query_string_behavior = "all"
+  }
+}
+
+# Update the Route53 record to point to CloudFront
 resource "aws_route53_record" "api" {
   name    = var.domain_name
   type    = "A"
   zone_id = var.hosted_zone_id
 
   alias {
-    name                   = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].target_domain_name
-    zone_id                = aws_apigatewayv2_domain_name.api.domain_name_configuration[0].hosted_zone_id
+    name                   = aws_cloudfront_distribution.image_distribution.domain_name
+    zone_id                = aws_cloudfront_distribution.image_distribution.hosted_zone_id
     evaluate_target_health = false
   }
 }
